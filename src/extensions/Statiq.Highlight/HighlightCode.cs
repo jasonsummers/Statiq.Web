@@ -90,7 +90,7 @@ namespace Statiq.Highlight
         /// <inheritdoc />
         protected override async Task<IEnumerable<IDocument>> ExecuteContextAsync(IExecutionContext context)
         {
-            IJavaScriptEnginePool enginePool = context.GetJavaScriptEnginePool(x =>
+            IJavaScriptEngine engine = context.GetJavaScriptEngine(x =>
             {
                 if (string.IsNullOrWhiteSpace(_highlightJsFile))
                 {
@@ -101,7 +101,7 @@ namespace Statiq.Highlight
                     x.ExecuteFile(_highlightJsFile);
                 }
             });
-            using (enginePool)
+            using (engine)
             {
                 IEnumerable<IDocument> results = await context.Inputs.ParallelSelectAsync(async input =>
                 {
@@ -125,7 +125,7 @@ namespace Statiq.Highlight
 
                             try
                             {
-                                HighlightElement(enginePool, element);
+                                HighlightElement(engine, element);
                                 highlighted = true;
                             }
                             catch (Exception innerEx)
@@ -155,34 +155,31 @@ namespace Statiq.Highlight
             }
         }
 
-        internal static void HighlightElement(IJavaScriptEnginePool enginePool, AngleSharp.Dom.IElement element)
+        internal static void HighlightElement(IJavaScriptEngine engine, AngleSharp.Dom.IElement element)
         {
-            using (IJavaScriptEngine engine = enginePool.GetEngine())
+            // Make sure to use TextContent, otherwise you'll get escaped html which highlight.js won't parse
+            engine.SetVariableValue("input", element.TextContent);
+
+            // Check if they specified a language in their code block
+            string language = element.ClassList.FirstOrDefault(i => i.StartsWith("language"));
+            if (language is object)
             {
-                // Make sure to use TextContent, otherwise you'll get escaped html which highlight.js won't parse
-                engine.SetVariableValue("input", element.TextContent);
-
-                // Check if they specified a language in their code block
-                string language = element.ClassList.FirstOrDefault(i => i.StartsWith("language"));
-                if (language is object)
-                {
-                    engine.SetVariableValue("language", language.Replace("language-", string.Empty));
-                    engine.Execute("result = hljs.highlight(language, input)");
-                }
-                else
-                {
-                    language = "(auto)"; // set this to auto in case there is an exception below
-                    engine.Execute("result = hljs.highlightAuto(input)");
-                    string detectedLanguage = engine.Evaluate<string>("result.language");
-                    if (!string.IsNullOrWhiteSpace(detectedLanguage))
-                    {
-                        element.ClassList.Add("language-" + detectedLanguage);
-                    }
-                }
-
-                element.ClassList.Add("hljs");
-                element.InnerHtml = engine.Evaluate<string>("result.value");
+                engine.SetVariableValue("language", language.Replace("language-", string.Empty));
+                engine.Execute("result = hljs.highlight(language, input)");
             }
+            else
+            {
+                language = "(auto)"; // set this to auto in case there is an exception below
+                engine.Execute("result = hljs.highlightAuto(input)");
+                string detectedLanguage = engine.Evaluate<string>("result.language");
+                if (!string.IsNullOrWhiteSpace(detectedLanguage))
+                {
+                    element.ClassList.Add("language-" + detectedLanguage);
+                }
+            }
+
+            element.ClassList.Add("hljs");
+            element.InnerHtml = engine.Evaluate<string>("result.value");
         }
     }
 }

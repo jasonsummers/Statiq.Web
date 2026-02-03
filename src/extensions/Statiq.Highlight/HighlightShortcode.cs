@@ -58,7 +58,7 @@ namespace Statiq.Highlight
                 HighlightJsFile,
                 AddPre);
 
-            using (IJavaScriptEnginePool enginePool = context.GetJavaScriptEnginePool(x =>
+            using (IJavaScriptEngine engine = context.GetJavaScriptEngine(x =>
             {
                 if (dictionary.ContainsKey(HighlightJsFile))
                 {
@@ -77,7 +77,7 @@ namespace Statiq.Highlight
                 {
                     element.SetAttribute("class", $"language-{dictionary.GetString("Language")}");
                 }
-                HighlightCode.HighlightElement(enginePool, element);
+                HighlightCode.HighlightElement(engine, element);
                 if (dictionary.GetBool(AddPre) || (!dictionary.ContainsKey(AddPre) && content.Contains('\n')))
                 {
                     return $"<pre>{element.OuterHtml}</pre>";
