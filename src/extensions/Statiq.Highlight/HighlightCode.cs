@@ -90,73 +90,76 @@ namespace Statiq.Highlight
         /// <inheritdoc />
         protected override async Task<IEnumerable<IDocument>> ExecuteContextAsync(IExecutionContext context)
         {
-            IJavaScriptEngine engine = context.GetJavaScriptEngine(x =>
+            Func<IJavaScriptEngine> engineFunc = () =>
             {
-                if (string.IsNullOrWhiteSpace(_highlightJsFile))
+                return context.GetJavaScriptEngine(x =>
                 {
-                    x.ExecuteResource("highlight.js", typeof(HighlightCode));
-                }
-                else
-                {
-                    x.ExecuteFile(_highlightJsFile);
-                }
-            });
-            using (engine)
-            {
-                IEnumerable<IDocument> results = await context.Inputs.ParallelSelectAsync(async input =>
-                {
-                    try
+                    if (string.IsNullOrWhiteSpace(_highlightJsFile))
                     {
-                        IHtmlDocument htmlDocument = await input.ParseHtmlAsync();
-                        bool highlighted = false;
-                        foreach (AngleSharp.Dom.IElement element in htmlDocument.QuerySelectorAll(_codeQuerySelector))
-                        {
-                            // Don't highlight anything that potentially is already highlighted
-                            if (element.ClassList.Contains("hljs"))
-                            {
-                                continue;
-                            }
-
-                            // Skip highlighting if there is no language detected and auto highlight is disabled for unspecified languages
-                            if (!element.ClassList.Any(c => c.StartsWith("language")) && !_autoHighlightUnspecifiedLanguage)
-                            {
-                                continue;
-                            }
-
-                            try
-                            {
-                                HighlightElement(engine, element);
-                                highlighted = true;
-                            }
-                            catch (Exception innerEx)
-                            {
-                                if (innerEx.Message.Contains("Unknown language: ") && _warnOnMissingLanguage)
-                                {
-                                    context.LogWarning($"Exception while highlighting source code: {innerEx.Message}");
-                                }
-                                else
-                                {
-                                    context.LogInformation($"Exception while highlighting source code: {innerEx.Message}");
-                                }
-                            }
-                        }
-
-                        return highlighted ? input.Clone(context.GetContentProvider(htmlDocument)) : input;
+                        x.ExecuteResource("highlight.js", typeof(HighlightCode));
                     }
-                    catch (Exception ex)
+                    else
                     {
-                        context.LogWarning("Exception while highlighting source code for {0}: {1}", input.ToSafeDisplayString(), ex.Message);
-                        return input;
+                        x.ExecuteFile(_highlightJsFile);
                     }
                 });
+            };
 
-                // Materialize the results before disposing the JS engine
-                return results.ToList();
-            }
+            IEnumerable<IDocument> results = await context.Inputs.ParallelSelectAsync(async input =>
+            {
+                try
+                {
+                    IHtmlDocument htmlDocument = await input.ParseHtmlAsync();
+                    bool highlighted = false;
+                    foreach (AngleSharp.Dom.IElement element in htmlDocument.QuerySelectorAll(_codeQuerySelector))
+                    {
+                        // Don't highlight anything that potentially is already highlighted
+                        if (element.ClassList.Contains("hljs"))
+                        {
+                            continue;
+                        }
+
+                        // Skip highlighting if there is no language detected and auto highlight is disabled for unspecified languages
+                        if (!element.ClassList.Any(c => c.StartsWith("language")) && !_autoHighlightUnspecifiedLanguage)
+                        {
+                            continue;
+                        }
+
+                        try
+                        {
+                            HighlightElement(engineFunc, element);
+                            highlighted = true;
+                        }
+                        catch (Exception innerEx)
+                        {
+                            if (innerEx.Message.Contains("Unknown language: ") && _warnOnMissingLanguage)
+                            {
+                                context.LogWarning($"Exception while highlighting source code: {innerEx.Message}");
+                            }
+                            else
+                            {
+                                context.LogInformation($"Exception while highlighting source code: {innerEx.Message}");
+                            }
+                        }
+                    }
+
+                    return highlighted ? input.Clone(context.GetContentProvider(htmlDocument)) : input;
+                }
+                catch (Exception ex)
+                {
+                    context.LogWarning("Exception while highlighting source code for {0}: {1}", input.ToSafeDisplayString(), ex.Message);
+                    return input;
+                }
+            });
+
+            // Materialize the results before disposing the JS engine
+            return results.ToList();
         }
 
-        internal static void HighlightElement(IJavaScriptEngine engine, AngleSharp.Dom.IElement element)
+        internal static void HighlightElement(Func<IJavaScriptEngine> engineFunc, AngleSharp.Dom.IElement element)
         {
+            using IJavaScriptEngine engine = engineFunc();
+
             // Make sure to use TextContent, otherwise you'll get escaped html which highlight.js won't parse
             engine.SetVariableValue("input", element.TextContent);
 
